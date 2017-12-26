@@ -144,12 +144,12 @@ int redis_get_next_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
 
     ///////////scan for next port/////////////////////////////////
     for (idx = 0; idx < sizeof(g_scan_ports)/sizeof(int); idx++) {
-        if (g_scan_ports[idx] == p_addr->i_port) {
+        if (g_scan_ports[idx] == p_addr->us_port) {
             break;
         }
     }
     if ( idx < sizeof(g_scan_ports)/sizeof(int) -1) {
-        p_addr->i_port = g_scan_ports[idx+1];
+        p_addr->us_port = g_scan_ports[idx+1];
         return WIFICAM_SUCCESS;
     }
 
@@ -169,7 +169,7 @@ int redis_get_next_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
         convert_set2ipaddrs(reply->element[0]->str, &start, &finish);
         freeReplyObject(reply);
         p_addr->i_index = index;
-        p_addr->i_port  = g_scan_ports[0];
+        p_addr->us_port = g_scan_ports[0];
 
         if (start <= p_addr->i_ipaddr + 1 && p_addr->i_ipaddr +1 <= finish ) {
             p_addr->i_ipaddr = p_addr->i_ipaddr +1;

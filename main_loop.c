@@ -23,7 +23,7 @@ mail: alexwanghangzhou@gmail.com
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 32
-#define WIFICAM_SCAN_WINDOW 1000
+#define WIFICAM_SCAN_WINDOW 1
 #define EPOLL_TIMEOUT   7000
 
 
@@ -213,22 +213,21 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
         return -1;
     }
 
-    setSockNonBlock(sockfd);
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port   = htonl(ipaddr->i_port);
+    servaddr.sin_port   = htons(ipaddr->us_port);
     (void)inet_pton(AF_INET, tsk->ipstr, &servaddr.sin_addr);
     ret = connect(sockfd, &servaddr, sizeof(servaddr));
     if (ret < 0 && errno != EINPROGRESS) {
         syslog(LOG_ERR, "Try to connect [%s:%d] failed, errstring [%s].\n",
-               tsk->ipstr, ipaddr->i_port, strerror(errno));
+               tsk->ipstr, ipaddr->us_port, strerror(errno));
         close(sockfd);
         free_spider_task(tsk);
         return -1;
     }
 
     main_loop_epoll_ctl(EPOLL_CTL_ADD, EPOLLIN | EPOLLOUT, tsk);
-    syslog(LOG_INFO, "add epoll, connect [%s:%d]\n", tsk->ipstr, ipaddr->i_port);
+    syslog(LOG_INFO, "add epoll, connect [%s:%d]\n", tsk->ipstr, ipaddr->us_port);
 
     return ret;
 }
@@ -285,7 +284,7 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     if (NULL != strstr(g_rev_buff, goahead))
     {
         snprintf(cmd, sizeof(cmd), "RPUSH %s-%s \"%s:%d\"", tsk->location,
-              "GoAhead", tsk->ipstr, tsk->ipaddr.i_port);
+              "GoAhead", tsk->ipstr, tsk->ipaddr.us_port);
          reply = redis_execute_cmd(cmd);
          if (NULL == reply) {
              freeReplyObject(reply);
@@ -299,7 +298,7 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     if (NULL != strcasestr(g_rev_buff, wificam))
     {
         snprintf(cmd, sizeof(cmd), "RPUSH %s-%s \"%s:%d\"", tsk->location,
-              "WIFICAM", tsk->ipstr, tsk->ipaddr.i_port);
+              "WIFICAM", tsk->ipstr, tsk->ipaddr.us_port);
          reply = redis_execute_cmd(cmd);
          if (NULL == reply) {
              freeReplyObject(reply);
@@ -319,11 +318,11 @@ void main_loop_handle_out_event(wificam_spider_s* tsk)
 
     ret = send_get_request(tsk->sockfd,
                            tsk->ipstr,
-                           tsk->ipaddr.i_port);
+                           tsk->ipaddr.us_port);
 
     if (ret < 0) {
         syslog(LOG_ERR, "Send out request failed to %s:%d\n",
-               tsk->ipstr, tsk->ipaddr.i_port);
+               tsk->ipstr, tsk->ipaddr.us_port);
         return;
     }
     main_loop_epoll_ctl(EPOLL_CTL_MOD, EPOLLIN, tsk);
@@ -349,6 +348,49 @@ void main_loop_handle_out_event(wificam_spider_s* tsk)
      EPOLLET = 1u << 31
    };
  */
+
+void print_event_types(uint32_t event)
+{
+    int len = 0;
+    char buf[256] = {0};
+
+    len = snprintf(buf, sizeof(buf), "%s", "Triggerred events:");
+    if (event & EPOLLIN) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLIN");
+    }
+    if (event & EPOLLPRI) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLPRI");
+    }
+    if (event & EPOLLOUT) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLOUT");
+    }
+    if (event & EPOLLRDNORM) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLRDNORM");
+    }
+    if (event & EPOLLWRBAND) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLWRBAND");
+    }
+    if (event & EPOLLMSG) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLMSG");
+    }
+    if (event & EPOLLERR) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLERR");
+    }
+    if (event & EPOLLHUP) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLHUP");
+    }
+    if (event & EPOLLRDHUP) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLRDHUP");
+    }
+    if (event & EPOLLWAKEUP) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLWAKEUP");
+    }
+    if (event & EPOLLONESHOT) {
+        len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLONESHOT");
+    }
+    syslog(LOG_INFO, "%s", buf);
+}
+
 void main_loop_handle(uint32_t event, void* ptr)
 {
     wificam_spider_s* tsk = NULL;
@@ -356,30 +398,31 @@ void main_loop_handle(uint32_t event, void* ptr)
         syslog(LOG_ERR, "In main loop handle ptr is NULL, event:%d.\n", event);
         return;
     }
+    print_event_types(event);
     tsk = (wificam_spider_s*)ptr;
 
     if (event & EPOLLERR) {
         syslog(LOG_INFO, "EPOLLERR for socket:%d %s:%d\n", tsk->sockfd,
-                tsk->ipstr, tsk->ipaddr.i_port);
+                tsk->ipstr, tsk->ipaddr.us_port);
         free_spider_task(tsk);
     } else if (event & EPOLLHUP) {
         syslog(LOG_INFO, "EPOLLHUP for socket:%d %s:%d\n", tsk->sockfd,
-                tsk->ipstr, tsk->ipaddr.i_port);
+                tsk->ipstr, tsk->ipaddr.us_port);
         free_spider_task(tsk);
     } else if (event & EPOLLIN) {
         syslog(LOG_INFO, "EPOLLIN for socket:%d %s:%d\n", tsk->sockfd,
-                tsk->ipstr, tsk->ipaddr.i_port);
+                tsk->ipstr, tsk->ipaddr.us_port);
         main_loop_handle_in_event(tsk);
     } else if (event & EPOLLOUT) {
         syslog(LOG_INFO, "EPOLLOUT for socket:%d\n %s:%d", tsk->sockfd,
-            tsk->ipstr, tsk->ipaddr.i_port);
+            tsk->ipstr, tsk->ipaddr.us_port);
         main_loop_handle_out_event(tsk);
     } else if (event & EPOLLONESHOT) {
         syslog(LOG_INFO, "EPOLLONESHOT for socket:%d %s:%d\n", tsk->sockfd,
-            tsk->ipstr, tsk->ipaddr.i_port);
+            tsk->ipstr, tsk->ipaddr.us_port);
     } else {
         syslog(LOG_ERR, "UNKNOWN event:%d for socket:%d %s:%d\n", event,
-            tsk->sockfd, tsk->ipstr, tsk->ipaddr.i_port);
+            tsk->sockfd, tsk->ipstr, tsk->ipaddr.us_port);
     }
 }
 
@@ -394,7 +437,12 @@ int main(int argc, char **argv)
    redis_init_conn_ctx();
 
    ret = redis_get_first_ip_with_key("BJ", &ipaddr);
+   //"123.122.23.248"
+   //ipaddr.i_index = 0;
+   //ipaddr.i_ipaddr = 2071599096;
+   //ipaddr.us_port = 81;
    main_loop_handle_slid_window("BJ", &ipaddr);
+   //init_spider_connection("BJ", &ipaddr);
    while (1) {
       ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, 0);
       if (ret < 0) {
@@ -406,6 +454,7 @@ int main(int argc, char **argv)
       for (int i=0; i < ret; i++) {
           main_loop_handle(events[i].events, events[i].data.ptr);
       }
+      //init_spider_connection("BJ", &ipaddr);
       main_loop_handle_slid_window("BJ", &g_last_spider_addr);
    }
 }
