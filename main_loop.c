@@ -23,7 +23,7 @@ mail: alexwanghangzhou@gmail.com
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 32
-#define WIFICAM_SCAN_WINDOW 1
+#define WIFICAM_SCAN_WINDOW 2
 #define EPOLL_TIMEOUT   7000
 
 
@@ -97,7 +97,8 @@ Upgrade-Insecure-Requests: 1 \r\n\
 User-Agent: Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 Safari/537.36 \r\n\
 Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8 \r\n\
 Accept-Encoding: gzip, deflate, sdch \r\n\
-Accept-Language: zh-CN,zh;q=0.8";
+Accept-Language: zh-CN,zh;q=0.8 \r\n\
+\r\n";
 
    if (sockfd < 0) {
       return -1;
@@ -349,12 +350,13 @@ void main_loop_handle_out_event(wificam_spider_s* tsk)
    };
  */
 
-void print_event_types(uint32_t event)
+void print_event_types(uint32_t event, wificam_spider_s* tsk)
 {
     int len = 0;
     char buf[256] = {0};
 
-    len = snprintf(buf, sizeof(buf), "%s", "Triggerred events:");
+    len = snprintf(buf, sizeof(buf), "socket:%d %s:%d, events:",
+                   tsk->sockfd, tsk->ipstr, tsk->ipaddr.us_port);
     if (event & EPOLLIN) {
         len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLIN");
     }
@@ -398,31 +400,19 @@ void main_loop_handle(uint32_t event, void* ptr)
         syslog(LOG_ERR, "In main loop handle ptr is NULL, event:%d.\n", event);
         return;
     }
-    print_event_types(event);
     tsk = (wificam_spider_s*)ptr;
+    print_event_types(event, tsk);
 
     if (event & EPOLLERR) {
-        syslog(LOG_INFO, "EPOLLERR for socket:%d %s:%d\n", tsk->sockfd,
-                tsk->ipstr, tsk->ipaddr.us_port);
         free_spider_task(tsk);
     } else if (event & EPOLLHUP) {
-        syslog(LOG_INFO, "EPOLLHUP for socket:%d %s:%d\n", tsk->sockfd,
-                tsk->ipstr, tsk->ipaddr.us_port);
         free_spider_task(tsk);
     } else if (event & EPOLLIN) {
-        syslog(LOG_INFO, "EPOLLIN for socket:%d %s:%d\n", tsk->sockfd,
-                tsk->ipstr, tsk->ipaddr.us_port);
         main_loop_handle_in_event(tsk);
     } else if (event & EPOLLOUT) {
-        syslog(LOG_INFO, "EPOLLOUT for socket:%d\n %s:%d", tsk->sockfd,
-            tsk->ipstr, tsk->ipaddr.us_port);
         main_loop_handle_out_event(tsk);
     } else if (event & EPOLLONESHOT) {
-        syslog(LOG_INFO, "EPOLLONESHOT for socket:%d %s:%d\n", tsk->sockfd,
-            tsk->ipstr, tsk->ipaddr.us_port);
     } else {
-        syslog(LOG_ERR, "UNKNOWN event:%d for socket:%d %s:%d\n", event,
-            tsk->sockfd, tsk->ipstr, tsk->ipaddr.us_port);
     }
 }
 
@@ -436,11 +426,11 @@ int main(int argc, char **argv)
    init();
    redis_init_conn_ctx();
 
-   ret = redis_get_first_ip_with_key("BJ", &ipaddr);
+   //ret = redis_get_first_ip_with_key("BJ", &ipaddr);
    //"123.122.23.248"
-   //ipaddr.i_index = 0;
-   //ipaddr.i_ipaddr = 2071599096;
-   //ipaddr.us_port = 81;
+   ipaddr.i_index = 0;
+   ipaddr.i_ipaddr = 2071599096;
+   ipaddr.us_port = 80;
    main_loop_handle_slid_window("BJ", &ipaddr);
    //init_spider_connection("BJ", &ipaddr);
    while (1) {
