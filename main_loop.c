@@ -23,7 +23,7 @@ mail: alexwanghangzhou@gmail.com
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 32
-#define WIFICAM_SCAN_WINDOW 2
+#define WIFICAM_SCAN_WINDOW 7000
 #define EPOLL_TIMEOUT   7000
 
 
@@ -68,8 +68,8 @@ int main_loop_rev_data(int fd)
       return error;
    }
 
-   memset( g_rev_buff, 0, sizeof(g_revbuf_len) );
-   return recv(fd, g_rev_buff, sizeof(g_rev_buff), 0);
+   memset( g_rev_buff, 0, g_revbuf_len );
+   return recv(fd, g_rev_buff, g_revbuf_len, 0);
 }
 
 
@@ -204,7 +204,7 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
-        syslog(LOG_ERR, "in init_spider, create socket failed.\n");
+        syslog(LOG_ERR, "in init_spider, create socket failed:%s.\n", strerror(errno));
         return -1;
     }
     setSockNonBlock(sockfd);
@@ -228,7 +228,7 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
     }
 
     main_loop_epoll_ctl(EPOLL_CTL_ADD, EPOLLIN | EPOLLOUT, tsk);
-    syslog(LOG_INFO, "add epoll, connect [%s:%d]\n", tsk->ipstr, ipaddr->us_port);
+    //syslog(LOG_INFO, "add epoll, connect [%s:%d]\n", tsk->ipstr, ipaddr->us_port);
 
     return ret;
 }
@@ -281,10 +281,11 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
         syslog(LOG_ERR, "Receive data failed.\n");
         return;
     }
+    syslog(LOG_INFO, "contens:%s", g_rev_buff);
 
     if (NULL != strstr(g_rev_buff, goahead))
     {
-        snprintf(cmd, sizeof(cmd), "RPUSH %s-%s \"%s:%d\"", tsk->location,
+        snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
               "GoAhead", tsk->ipstr, tsk->ipaddr.us_port);
          reply = redis_execute_cmd(cmd);
          if (NULL == reply) {
@@ -298,7 +299,7 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
 
     if (NULL != strcasestr(g_rev_buff, wificam))
     {
-        snprintf(cmd, sizeof(cmd), "RPUSH %s-%s \"%s:%d\"", tsk->location,
+        snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
               "WIFICAM", tsk->ipstr, tsk->ipaddr.us_port);
          reply = redis_execute_cmd(cmd);
          if (NULL == reply) {
@@ -401,7 +402,7 @@ void main_loop_handle(uint32_t event, void* ptr)
         return;
     }
     tsk = (wificam_spider_s*)ptr;
-    print_event_types(event, tsk);
+    //print_event_types(event, tsk);
 
     if (event & EPOLLERR) {
         free_spider_task(tsk);
