@@ -23,11 +23,12 @@ mail: alexwanghangzhou@gmail.com
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 32
-#define WIFICAM_SCAN_WINDOW 7000
+#define WIFICAM_SCAN_WINDOW 5000
 #define EPOLL_TIMEOUT   7000
 
 
 static int g_total_spider_tsks = 0;
+static long g_total_spider_ipaddr_tsks = 0;
 static wificam_ip_s g_last_spider_addr;
 int g_scan_epfd = WIFICAM_INVALID_FD;
 char *g_rev_buff = NULL;
@@ -82,9 +83,12 @@ void setSockNonBlock(int fd)
    if (flags < 0) {
       syslog(LOG_ERR, "fcntl(F_GETFL) failed, err_string:%s.\n", strerror(errno));
    }
-   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+
+   flags = flags | O_NONBLOCK;
+   if (fcntl(fd, F_SETFL, flags) < 0)  {
       syslog(LOG_ERR, "fcntl(F_SETFL) failed, err_string:%s.\n", strerror(errno));
    }
+   
 }
 
 int send_get_request(int sockfd, const char *ip, int port)
@@ -184,6 +188,7 @@ void main_loop_epoll_ctl(int op, uint32_t events, wificam_spider_s* spider_tsk)
     if (EPOLL_CTL_ADD == op) {
         g_last_spider_addr = (spider_tsk->ipaddr);
         g_total_spider_tsks++;
+        g_total_spider_ipaddr_tsks++;
     } else if (EPOLL_CTL_DEL == op) {
         g_total_spider_tsks--;
     }
@@ -226,9 +231,12 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
         free_spider_task(tsk);
         return -1;
     }
-
     main_loop_epoll_ctl(EPOLL_CTL_ADD, EPOLLIN | EPOLLOUT, tsk);
-    //syslog(LOG_INFO, "add epoll, connect [%s:%d]\n", tsk->ipstr, ipaddr->us_port);
+
+    if (!(g_total_spider_ipaddr_tsks % 1000)) {
+        syslog(LOG_INFO, "add epoll, connect [%s:%d], total spider tasks:%lu\n", tsk->ipstr, 
+        ipaddr->us_port, g_total_spider_ipaddr_tsks);
+    }
 
     return ret;
 }
@@ -255,7 +263,7 @@ void main_loop_handle_slid_window(const char* p_key, wificam_ip_s* p_addr)
 
     while (g_total_spider_tsks < WIFICAM_SCAN_WINDOW) {
         ret = redis_get_next_ip_with_key(p_key, p_addr);
-        if (WIFICAM_SUCCESS != ret) {
+        if (WIFICAM_SUCCESS != ret)  {
             if (WIFICAM_SCAN_FINISH == ret) {
                 syslog(LOG_ERR, "Scan finished:%s, %s.\n", p_key, ip);
             } else {
@@ -274,6 +282,13 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     redisReply* reply = NULL;
     static char* goahead = "Server: GoAhead-Webs";
     static char* wificam = "realm=\"WIFICAM\"";
+    static char* hikvision = "Server: Hikvision-Webs";
+    static char* idvrhttpsrv = "Server: iDVRhttpSvr";
+    static char* h3chttp  = "Server: H3C";
+    static char* quidway = "Server: Quidway";
+    static char* cisco = "Server: cisco-IOS";
+    static char* dvrdvs = "DVRDVS-Webs";
+    static char* nvrser = "NVR";
 
     ret = main_loop_rev_data(tsk->sockfd);
     if (ret < 0) {
@@ -423,17 +438,18 @@ int main(int argc, char **argv)
    wificam_ip_s ipaddr;
    struct epoll_event events[EPOLL_MAXEVENTS];
    memset(events, 0, sizeof(events));
+   char* pkey = "HB";
 
    init();
    redis_init_conn_ctx();
 
-   //ret = redis_get_first_ip_with_key("BJ", &ipaddr);
-   //"123.122.23.248"
+   //ret = redis_get_first_ip_with_key(pkey, &ipaddr);
    ipaddr.i_index = 0;
-   ipaddr.i_ipaddr = 2071599096;
-   ipaddr.us_port = 80;
-   main_loop_handle_slid_window("BJ", &ipaddr);
-   //init_spider_connection("BJ", &ipaddr);
+   int net_addr;
+   inet_pton(AF_INET, "119.99.152.54", &net_addr);
+   ipaddr.i_ipaddr = ntohl(net_addr);
+   ipaddr.us_port = 81;
+   main_loop_handle_slid_window(pkey, &ipaddr);
    while (1) {
       ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, 0);
       if (ret < 0) {
@@ -445,8 +461,7 @@ int main(int argc, char **argv)
       for (int i=0; i < ret; i++) {
           main_loop_handle(events[i].events, events[i].data.ptr);
       }
-      //init_spider_connection("BJ", &ipaddr);
-      main_loop_handle_slid_window("BJ", &g_last_spider_addr);
+      main_loop_handle_slid_window(pkey, &g_last_spider_addr);
    }
 }
 

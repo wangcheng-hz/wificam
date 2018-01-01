@@ -12,7 +12,7 @@ static pthread_mutex_t g_conn_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
 static redisContext *g_redis_conn_ctx = NULL; /* connection used for all threads */
 /////////////////////////////////////////////////////////
 //static redisContext *g_redis_ep_ctx = NULL;
-static int g_scan_ports[] = {80, 81};
+static int g_scan_ports[] = {81};
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -162,7 +162,7 @@ int redis_get_next_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
             syslog(LOG_ERR, "execute cmd:%s failed\n", buff);
             return WIFICAM_FAILED;
         }
-        if (REDIS_REPLY_NIL == reply->type) {
+        if (0 == reply->elements) {
             freeReplyObject(reply);
             return WIFICAM_SCAN_FINISH;
         }
