@@ -451,7 +451,7 @@ int main(int argc, char **argv)
    ipaddr.us_port = 81;
    main_loop_handle_slid_window(pkey, &ipaddr);
    while (1) {
-      ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, 0);
+      ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, -1);
       if (ret < 0) {
           finish();
       } else if (ret == 0) {
