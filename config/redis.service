@@ -1,0 +1,10 @@
+[Unit]
+Description=redis daemon
+After=network.service
+
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/redis-server /home/trunk/redis/redis-stable/redis.conf
+
+[Install]
+WantedBy=multi-user.target
