@@ -23,7 +23,7 @@ mail: alexwanghangzhou@gmail.com
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 32
-#define WIFICAM_SCAN_WINDOW 5000
+#define WIFICAM_SCAN_WINDOW 50000
 #define EPOLL_TIMEOUT   7000
 
 
@@ -88,7 +88,7 @@ void setSockNonBlock(int fd)
    if (fcntl(fd, F_SETFL, flags) < 0)  {
       syslog(LOG_ERR, "fcntl(F_SETFL) failed, err_string:%s.\n", strerror(errno));
    }
-   
+
 }
 
 int send_get_request(int sockfd, const char *ip, int port)
@@ -234,7 +234,7 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
     main_loop_epoll_ctl(EPOLL_CTL_ADD, EPOLLIN | EPOLLOUT, tsk);
 
     if (!(g_total_spider_ipaddr_tsks % 1000)) {
-        syslog(LOG_INFO, "add epoll, connect [%s:%d], total spider tasks:%lu\n", tsk->ipstr, 
+        syslog(LOG_INFO, "add epoll, connect [%s:%d], total spider tasks:%lu\n", tsk->ipstr,
         ipaddr->us_port, g_total_spider_ipaddr_tsks);
     }
 
@@ -280,6 +280,7 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     int ret = 0;
     char cmd[256] = {0};
     redisReply* reply = NULL;
+    /*
     static char* goahead = "Server: GoAhead-Webs";
     static char* wificam = "realm=\"WIFICAM\"";
     static char* hikvision = "Server: Hikvision-Webs";
@@ -289,6 +290,13 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     static char* cisco = "Server: cisco-IOS";
     static char* dvrdvs = "DVRDVS-Webs";
     static char* nvrser = "NVR";
+    */
+    static char* key[] = {"Server: GoAhead-Webs", "realm=\"WIFICAM\"", "Server: Hikvision-Webs",
+                          "Server: iDVRhttpSvr", "Server: H3C", "Server: Quidway",
+                          "Server: cisco-IOS", "DVRDVS-Webs", "NVR"};
+    static char* brand[] = {"GoAhead", "WIFICAM", "Hikvision",
+                            "iDVRhttpSvr", "H3C", "Quidway",
+                            "cisco-IOS", "DVRDVS", "NVR"};
 
     ret = main_loop_rev_data(tsk->sockfd);
     if (ret < 0) {
@@ -298,20 +306,23 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     }
     syslog(LOG_INFO, "contens:%s", g_rev_buff);
 
-    if (NULL != strstr(g_rev_buff, goahead))
-    {
-        snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
-              "GoAhead", tsk->ipstr, tsk->ipaddr.us_port);
-         reply = redis_execute_cmd(cmd);
-         if (NULL == reply) {
+    for (int i = 0; i < sizeof(key) / sizeof(char*); ++i) {
+        if (NULL != strstr(g_rev_buff, key[i]))
+        {
+            snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
+                  brand[i], tsk->ipstr, tsk->ipaddr.us_port);
+             reply = redis_execute_cmd(cmd);
+             if (NULL == reply) {
+                 freeReplyObject(reply);
+                 main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
+                 syslog(LOG_ERR, "Push data to redis failed, cmd:%s\n", cmd);
+                 return;
+             }
              freeReplyObject(reply);
-             main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
-             syslog(LOG_ERR, "Push data to redis failed, cmd:%s\n", cmd);
-             return;
-         }
-         freeReplyObject(reply);
+        }
     }
 
+/*
     if (NULL != strcasestr(g_rev_buff, wificam))
     {
         snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
@@ -325,7 +336,7 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
          }
          freeReplyObject(reply);
     }
-
+*/
     main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
 }
 
@@ -438,17 +449,19 @@ int main(int argc, char **argv)
    wificam_ip_s ipaddr;
    struct epoll_event events[EPOLL_MAXEVENTS];
    memset(events, 0, sizeof(events));
-   char* pkey = "HB";
+   char* pkey = "BJ";
 
    init();
    redis_init_conn_ctx();
 
-   //ret = redis_get_first_ip_with_key(pkey, &ipaddr);
+   ret = redis_get_first_ip_with_key(pkey, &ipaddr);
+   /*
    ipaddr.i_index = 0;
    int net_addr;
    inet_pton(AF_INET, "119.99.152.54", &net_addr);
    ipaddr.i_ipaddr = ntohl(net_addr);
    ipaddr.us_port = 81;
+   */
    main_loop_handle_slid_window(pkey, &ipaddr);
    while (1) {
       ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, -1);
