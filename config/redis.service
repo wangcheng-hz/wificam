@@ -4,7 +4,7 @@ After=network.service
 
 [Service]
 Type=forking
-ExecStart=/usr/local/bin/redis-server /home/trunk/redis/redis-stable/redis.conf
+ExecStart=/usr/local/bin/redis-server /etc/redis.conf
 
 [Install]
 WantedBy=multi-user.target

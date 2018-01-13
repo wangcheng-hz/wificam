@@ -22,8 +22,8 @@ mail: alexwanghangzhou@gmail.com
 #include "socket_op.h"
 #include "redis_thread.h"
 
-#define EPOLL_MAXEVENTS 32
-#define WIFICAM_SCAN_WINDOW 50000
+#define EPOLL_MAXEVENTS 256
+#define WIFICAM_SCAN_WINDOW 20000
 #define EPOLL_TIMEOUT   7000
 
 
@@ -32,21 +32,28 @@ static long g_total_spider_ipaddr_tsks = 0;
 static wificam_ip_s g_last_spider_addr;
 int g_scan_epfd = WIFICAM_INVALID_FD;
 char *g_rev_buff = NULL;
+static char *g_city_list[] = {"SC", "HB", "GD", "SD", "ZJ", "JS", "SH", "LN",
+                              "BJ", "CQ", "FJ", "HN", "HE", "HA", "SX", "JX",
+                              "SN", "AH", "HL", "GX", "JL", "YN", "TJ", "NM",
+                              "XJ", "GS", "GZ", "HI", "NX", "QH", "XZ", "HK"};
+static char *g_scaning_city = NULL;
 static int g_revbuf_len = 8 * 1024 * 1024;
 
 void init()
 {
-   g_scan_epfd = epoll_create(1);
-   if (g_scan_epfd < 0) {
+    g_scaning_city = g_city_list[0];
+
+    g_scan_epfd = epoll_create(1);
+    if (g_scan_epfd < 0) {
       syslog(LOG_ERR, "init epoll fd failed, exit!\n");
       exit(-1);
-   }
-   g_rev_buff = (char *)malloc(g_revbuf_len);
-   if (NULL == g_rev_buff) {
+    }
+    g_rev_buff = (char *)malloc(g_revbuf_len);
+    if (NULL == g_rev_buff) {
       syslog(LOG_ERR, "init global buff failed, exit!\n");
       exit(-1);
-   }
-   memset(g_rev_buff, 0, sizeof(g_revbuf_len));
+    }
+    memset(g_rev_buff, 0, sizeof(g_revbuf_len));
 }
 
 void finish()
@@ -56,6 +63,20 @@ void finish()
       g_rev_buff = NULL;
    }
    exit(-1);
+}
+
+static char* get_next_city(const char* city)
+{
+    char* tmp = NULL;
+    int len = sizeof(g_city_list) / sizeof(char*);
+
+    for (int i = 0; i < len; i++) {
+        if (0 == strcmp(city, g_city_list[i]) && i < len - 1) {
+            tmp = g_city_list[i + 1];
+            return tmp;
+        }
+    }
+    return tmp;
 }
 
 int main_loop_rev_data(int fd)
@@ -243,11 +264,12 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
 
 
 
-void main_loop_handle_slid_window(const char* p_key, wificam_ip_s* p_addr)
+void main_loop_handle_slid_window(char* p_key, wificam_ip_s* p_addr)
 {
     int ret = WIFICAM_FAILED;
     int hostip = 0;
     char ip[128] = {0};
+    char* nextcity = NULL;
 
     if (NULL == p_key || NULL == p_addr) {
         syslog(LOG_ERR, "Absolutely something is wrong, input NULL pointers.\n");
@@ -262,9 +284,19 @@ void main_loop_handle_slid_window(const char* p_key, wificam_ip_s* p_addr)
     inet_ntop(AF_INET, &hostip, ip, sizeof(ip));
 
     while (g_total_spider_tsks < WIFICAM_SCAN_WINDOW) {
-        ret = redis_get_next_ip_with_key(p_key, p_addr);
+
+NEXTCITY:  ret = redis_get_next_ip_with_key(p_key, p_addr);
         if (WIFICAM_SUCCESS != ret)  {
             if (WIFICAM_SCAN_FINISH == ret) {
+                nextcity = get_next_city(p_key);
+                if (NULL != nextcity) {
+                    /* p_key is a tmp stack var. */
+                    p_key = nextcity;
+                    g_scaning_city = nextcity;
+                    memset(p_addr, 0x0, sizeof(wificam_ip_s));
+                    redis_get_first_ip_with_key(p_key, p_addr);
+                    goto NEXTCITY;
+                }
                 syslog(LOG_ERR, "Scan finished:%s, %s.\n", p_key, ip);
             } else {
                 syslog(LOG_ERR, "Get next ip failed from:%s, %s.\n", p_key, ip);
@@ -280,17 +312,6 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     int ret = 0;
     char cmd[256] = {0};
     redisReply* reply = NULL;
-    /*
-    static char* goahead = "Server: GoAhead-Webs";
-    static char* wificam = "realm=\"WIFICAM\"";
-    static char* hikvision = "Server: Hikvision-Webs";
-    static char* idvrhttpsrv = "Server: iDVRhttpSvr";
-    static char* h3chttp  = "Server: H3C";
-    static char* quidway = "Server: Quidway";
-    static char* cisco = "Server: cisco-IOS";
-    static char* dvrdvs = "DVRDVS-Webs";
-    static char* nvrser = "NVR";
-    */
     static char* key[] = {"Server: GoAhead-Webs", "realm=\"WIFICAM\"", "Server: Hikvision-Webs",
                           "Server: iDVRhttpSvr", "Server: H3C", "Server: Quidway",
                           "Server: cisco-IOS", "DVRDVS-Webs", "NVR"};
@@ -309,8 +330,8 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     for (int i = 0; i < sizeof(key) / sizeof(char*); ++i) {
         if (NULL != strstr(g_rev_buff, key[i]))
         {
-            snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
-                  brand[i], tsk->ipstr, tsk->ipaddr.us_port);
+            snprintf(cmd, sizeof(cmd), "RPUSH %s %s:%d-%s", brand[i],
+                     tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
              reply = redis_execute_cmd(cmd);
              if (NULL == reply) {
                  freeReplyObject(reply);
@@ -322,21 +343,6 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
         }
     }
 
-/*
-    if (NULL != strcasestr(g_rev_buff, wificam))
-    {
-        snprintf(cmd, sizeof(cmd), "RPUSH %s-%s %s:%d", tsk->location,
-              "WIFICAM", tsk->ipstr, tsk->ipaddr.us_port);
-         reply = redis_execute_cmd(cmd);
-         if (NULL == reply) {
-             freeReplyObject(reply);
-             main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
-             syslog(LOG_ERR, "Push data to redis failed, cmd:%s\n", cmd);
-             return;
-         }
-         freeReplyObject(reply);
-    }
-*/
     main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
 }
 
@@ -449,12 +455,11 @@ int main(int argc, char **argv)
    wificam_ip_s ipaddr;
    struct epoll_event events[EPOLL_MAXEVENTS];
    memset(events, 0, sizeof(events));
-   char* pkey = "BJ";
 
    init();
    redis_init_conn_ctx();
 
-   ret = redis_get_first_ip_with_key(pkey, &ipaddr);
+   ret = redis_get_first_ip_with_key(g_scaning_city, &ipaddr);
    /*
    ipaddr.i_index = 0;
    int net_addr;
@@ -462,7 +467,7 @@ int main(int argc, char **argv)
    ipaddr.i_ipaddr = ntohl(net_addr);
    ipaddr.us_port = 81;
    */
-   main_loop_handle_slid_window(pkey, &ipaddr);
+   main_loop_handle_slid_window(g_scaning_city, &ipaddr);
    while (1) {
       ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, -1);
       if (ret < 0) {
@@ -474,7 +479,7 @@ int main(int argc, char **argv)
       for (int i=0; i < ret; i++) {
           main_loop_handle(events[i].events, events[i].data.ptr);
       }
-      main_loop_handle_slid_window(pkey, &g_last_spider_addr);
+      main_loop_handle_slid_window(g_scaning_city, &g_last_spider_addr);
    }
 }
 
