@@ -40,7 +40,7 @@ static int g_revbuf_len = 8 * 1024 * 1024;
 
 void init()
 {
-    g_scaning_city = g_city_list[0];
+    g_scaning_city = g_city_list[7];
 
     g_scan_epfd = epoll_create(1);
     if (g_scan_epfd < 0) {
@@ -145,6 +145,7 @@ wificam_spider_s* malloc_spider_task( spider_task_e tsk_type,
         syslog(LOG_ERR, "malloc spider task failed.\n");
         return NULL;
     }
+    memset(tmp, 0x0, sizeof(*tmp));
     char* tmp_location = strdup((NULL == p_key) ? "unkown": p_key);
     if (NULL == tmp_location) {
         syslog(LOG_ERR, "strdup spider task key:%s failed.\n", p_key);
@@ -177,18 +178,12 @@ void free_spider_task(wificam_spider_s* tsk)
         return;
     }
     if (WIFICAM_INVALID_FD != tsk->sockfd) {
-        main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
+        //main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
         close(tsk->sockfd);
     }
-    if (NULL == tsk->ipstr) {
-        free(tsk->ipstr);
-    }
-    if (NULL == tsk->location) {
-        free(tsk->location);
-    }
-    if (NULL == tsk->data) {
-        free(tsk->data);
-    }
+    free(tsk->ipstr);
+    free(tsk->location);
+    free(tsk->data);
     free(tsk);
 }
 
@@ -211,6 +206,7 @@ void main_loop_epoll_ctl(int op, uint32_t events, wificam_spider_s* spider_tsk)
         g_total_spider_ipaddr_tsks++;
     } else if (EPOLL_CTL_DEL == op) {
         g_total_spider_tsks--;
+        free_spider_task(spider_tsk);
     }
 }
 
@@ -333,12 +329,10 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
                      tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
              reply = redis_execute_cmd(cmd);
              if (NULL == reply) {
-                 freeReplyObject(reply);
-                 main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
                  syslog(LOG_ERR, "Push data to redis failed, cmd:%s\n", cmd);
-                 return;
              }
              freeReplyObject(reply);
+             break;
         }
     }
 
@@ -436,15 +430,18 @@ void main_loop_handle(uint32_t event, void* ptr)
     //print_event_types(event, tsk);
 
     if (event & EPOLLERR) {
-        free_spider_task(tsk);
+        main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
+        //free_spider_task(tsk);
     } else if (event & EPOLLHUP) {
-        free_spider_task(tsk);
+        main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
+        //free_spider_task(tsk);
     } else if (event & EPOLLIN) {
         main_loop_handle_in_event(tsk);
     } else if (event & EPOLLOUT) {
         main_loop_handle_out_event(tsk);
-    } else if (event & EPOLLONESHOT) {
     } else {
+        print_event_types(event, tsk);
+        main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
     }
 }
 
