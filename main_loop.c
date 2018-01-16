@@ -328,7 +328,7 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
         syslog(LOG_ERR, "Receive data failed.\n");
         return;
     }
-    syslog(LOG_INFO, "contens:%s", g_rev_buff);
+    syslog(LOG_INFO, "%s:%d contens:%s", tsk->ipstr, tsk->ipaddr.us_port, g_rev_buff);
 
     for (int i = 0; i < sizeof(key) / sizeof(char*); ++i) {
         if (NULL != strstr(g_rev_buff, key[i]))
