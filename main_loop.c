@@ -308,11 +308,19 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     char cmd[256] = {0};
     redisReply* reply = NULL;
     static char* key[] = {"Server: GoAhead-Webs", "realm=\"WIFICAM\"", "Server: Hikvision-Webs",
-                          "Server: iDVRhttpSvr", "Server: H3C", "Server: Quidway",
-                          "Server: cisco-IOS", "DVRDVS-Webs", "NVR"};
+                           "Server: iDVRhttpSvr", "Server: H3C", "Server: Quidway",
+                           "Server: cisco-IOS", "DVRDVS-Webs", "NVR",
+                           "IPCamera", "ipcamera", "IP CAMERA", "IP Camera", 
+                           "NETSuveillance", "glin=false", "360wzws",
+                           "Sangfor", "Server: Switch", "Server: Lanswitch",
+                           "Server: router"};
     static char* brand[] = {"GoAhead", "WIFICAM", "Hikvision",
                             "iDVRhttpSvr", "H3C", "Quidway",
-                            "cisco-IOS", "DVRDVS", "NVR"};
+                            "cisco-IOS", "DVRDVS", "NVR",
+                            "ipcam", "ipcam", "ipcam", "ipcam",
+                            "netsuveillance", "dahua", "360wzws",
+                            "sangfor", "switch", "switch",
+                            "router"};
 
     ret = main_loop_rev_data(tsk->sockfd);
     if (ret < 0) {
@@ -456,13 +464,13 @@ int main(int argc, char **argv)
    redis_init_conn_ctx();
 
    ret = redis_get_first_ip_with_key(g_scaning_city, &ipaddr);
-   /*
+   
    ipaddr.i_index = 0;
    int net_addr;
-   inet_pton(AF_INET, "119.99.152.54", &net_addr);
+   inet_pton(AF_INET, "219.217.4.141", &net_addr);
    ipaddr.i_ipaddr = ntohl(net_addr);
    ipaddr.us_port = 81;
-   */
+   
    main_loop_handle_slid_window(g_scaning_city, &ipaddr);
    while (1) {
       errno = 0;
