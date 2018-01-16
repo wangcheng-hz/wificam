@@ -23,10 +23,9 @@ mail: alexwanghangzhou@gmail.com
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 256
-#define WIFICAM_SCAN_WINDOW 20000
 #define EPOLL_TIMEOUT   7000
 
-
+static int g_wificam_scan_slid_win = 1000;
 static int g_total_spider_tsks = 0;
 static long g_total_spider_ipaddr_tsks = 0;
 static wificam_ip_s g_last_spider_addr;
@@ -276,14 +275,14 @@ void main_loop_handle_slid_window(char* p_key, wificam_ip_s* p_addr)
         return;
     }
 
-    if (g_total_spider_tsks >= WIFICAM_SCAN_WINDOW) {
+    if (g_total_spider_tsks >= g_wificam_scan_slid_win) {
         return;
     }
 
     hostip = htonl(p_addr->i_ipaddr);
     inet_ntop(AF_INET, &hostip, ip, sizeof(ip));
 
-    while (g_total_spider_tsks < WIFICAM_SCAN_WINDOW) {
+    while (g_total_spider_tsks < g_wificam_scan_slid_win) {
 
 NEXTCITY:  ret = redis_get_next_ip_with_key(p_key, p_addr);
         if (WIFICAM_SUCCESS != ret)  {
@@ -469,10 +468,11 @@ int main(int argc, char **argv)
    */
    main_loop_handle_slid_window(g_scaning_city, &ipaddr);
    while (1) {
+      errno = 0;
       ret = epoll_wait(g_scan_epfd, events, EPOLL_MAXEVENTS, -1);
-      if (ret < 0) {
+      if (ret < 0 && errno != EINTR) {
           finish();
-      } else if (ret == 0) {
+      } else if (ret == 0 || errno == EINTR) {
           continue;
       }
 
