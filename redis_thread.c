@@ -12,7 +12,7 @@ static pthread_mutex_t g_conn_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
 static redisContext *g_redis_conn_ctx = NULL; /* connection used for all threads */
 /////////////////////////////////////////////////////////
 //static redisContext *g_redis_ep_ctx = NULL;
-static int g_scan_ports[] = {80, 81};
+static int g_scan_ports[] = {81};
 
 
 ///////////////////////////////////////////////////////////////////////////////

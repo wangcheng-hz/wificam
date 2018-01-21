@@ -15,11 +15,12 @@ mail: alexwanghangzhou@gmail.com
 #include <unistd.h>
 #include <string.h>
 #include <strings.h>
-#include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/syslog.h>
 #include <hiredis.h>
 #include "socket_op.h"
+#include "unix_server.h"
+#include "wificam_utility.h"
 #include "redis_thread.h"
 
 #define EPOLL_MAXEVENTS 256
@@ -94,99 +95,6 @@ int main_loop_rev_data(int fd)
 }
 
 
-
-void setSockNonBlock(int fd)
-{
-   int flags = 0;
-
-   flags = fcntl(fd, F_GETFL, 0);
-   if (flags < 0) {
-      syslog(LOG_ERR, "fcntl(F_GETFL) failed, err_string:%s.\n", strerror(errno));
-   }
-
-   flags = flags | O_NONBLOCK;
-   if (fcntl(fd, F_SETFL, flags) < 0)  {
-      syslog(LOG_ERR, "fcntl(F_SETFL) failed, err_string:%s.\n", strerror(errno));
-   }
-
-}
-
-int send_get_request(int sockfd, const char *ip, int port)
-{
-   char buff[2048];
-   char *get_string = "GET / HTTP/1.1 \r\n\
-Host: %s:%d \r\n\
-Connection: keep-alive \r\n\
-Upgrade-Insecure-Requests: 1 \r\n\
-User-Agent: Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 Safari/537.36 \r\n\
-Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8 \r\n\
-Accept-Encoding: gzip, deflate, sdch \r\n\
-Accept-Language: zh-CN,zh;q=0.8 \r\n\
-\r\n";
-
-   if (sockfd < 0) {
-      return -1;
-   }
-
-   memset(buff, 0, sizeof(buff));
-   (void)snprintf(buff, sizeof(buff), get_string, ip, port);
-   return send(sockfd, buff, strlen(buff), 0);
-}
-
-wificam_spider_s* malloc_spider_task( spider_task_e tsk_type,
-                                      int sock,
-                                      const char* p_key,
-                                      const wificam_ip_s* ipaddr )
-{
-    char ip[128] = {0};
-
-    wificam_spider_s* tmp = (wificam_spider_s*)malloc(sizeof(wificam_spider_s));
-    if (NULL == tmp) {
-        syslog(LOG_ERR, "malloc spider task failed.\n");
-        return NULL;
-    }
-    memset(tmp, 0x0, sizeof(*tmp));
-    char* tmp_location = strdup((NULL == p_key) ? "unkown": p_key);
-    if (NULL == tmp_location) {
-        syslog(LOG_ERR, "strdup spider task key:%s failed.\n", p_key);
-        free(tmp);
-        return NULL;
-    }
-    int intip = htonl(ipaddr->i_ipaddr);
-    char* tmp_ip = strdup(inet_ntop(AF_INET, &intip, ip, sizeof(ip)));
-    if (NULL == tmp_ip) {
-        syslog(LOG_ERR, "strdup spider task ip:%s failed.\n", p_key);
-        free(tmp);
-        free(tmp_location);
-        return NULL;
-    }
-
-    tmp->tsk_type = tsk_type;
-    tmp->sockfd   = sock;
-    tmp->location = tmp_location;
-    tmp->ipstr    = tmp_ip;
-    tmp->ipaddr   = *ipaddr;
-    return tmp;
-}
-
-extern
-void main_loop_epoll_ctl(int op, uint32_t events, wificam_spider_s* spider_tsk);
-
-void free_spider_task(wificam_spider_s* tsk)
-{
-    if (NULL == tsk) {
-        return;
-    }
-    if (WIFICAM_INVALID_FD != tsk->sockfd) {
-        //main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
-        close(tsk->sockfd);
-    }
-    free(tsk->ipstr);
-    free(tsk->location);
-    free(tsk->data);
-    free(tsk);
-}
-
 void main_loop_epoll_ctl(int op, uint32_t events, wificam_spider_s* spider_tsk)
 {
     struct epoll_event event;
@@ -230,7 +138,7 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
     }
     setSockNonBlock(sockfd);
 
-    tsk = malloc_spider_task(SPIDER_INIT, sockfd, p_key, ipaddr);
+    tsk = malloc_spider_task(SPIDER_INIT, sockfd, p_key, ipaddr, NULL);
     if (NULL == tsk) {
         return -1;
     }
@@ -302,7 +210,7 @@ NEXTCITY:  ret = redis_get_next_ip_with_key(p_key, p_addr);
     }
 }
 
-void main_loop_handle_in_event(wificam_spider_s* tsk)
+void main_loop_handle_scan_in_event(wificam_spider_s* tsk)
 {
     int ret = 0;
     char cmd[256] = {0};
@@ -347,7 +255,70 @@ void main_loop_handle_in_event(wificam_spider_s* tsk)
     main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
 }
 
-void main_loop_handle_out_event(wificam_spider_s* tsk)
+
+void main_loop_handle_client_in_event(wificam_spider_s* tsk)
+{
+    int acceptfd = WIFICAM_INVALID_FD;
+    wificam_spider_s* cli_tsk = NULL;
+
+    acceptfd = accept(tsk->sockfd, NULL, NULL);
+    if (acceptfd < 0) {
+        syslog(LOG_ERR, "Accept client connection failed, errstring:%s\n", strerror(errno));
+        return;
+    }
+
+    cli_tsk = malloc_spider_task(SPIDER_SERVER_ACK, acceptfd, NULL, NULL, NULL);
+    if (NULL == cli_tsk) {
+        return;
+    }
+
+    main_loop_epoll_ctl(EPOLL_CTL_ADD, EPOLLIN, cli_tsk);
+}
+
+void main_loop_handle_ack_client_event(wificam_spider_s* tsk)
+{
+    int ret = -1;
+    client_ack_data ack;
+
+    memset(&ack, 0x0, sizeof(ack));
+    ret = main_loop_rev_data(tsk->sockfd);
+    if (ret < 0) {
+        return;
+    }
+    
+    switch(((client_req_data*)g_rev_buff)->type) {
+        case SET_WINDOW_REQ:
+            g_wificam_scan_slid_win = *((int *)((client_req_data*)g_rev_buff)->data);
+            ret = WIFICAM_SUCCESS;
+            break;
+
+        case GET_WINDOW_REQ:
+            *(int*)ack.data = g_wificam_scan_slid_win;
+            ret = WIFICAM_SUCCESS;
+            break;
+        default:
+            ret = WIFICAM_FAILED;
+            syslog(LOG_ERR, "received invalid req type:%d\n", ((client_req_data*)g_rev_buff)->type);
+    }
+
+    ack.err = ret;
+    send(tsk->sockfd, &ack, sizeof(ack), 0);
+    main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
+}
+
+
+void main_loop_handle_in_event(wificam_spider_s* tsk)
+{
+    if (SPIDER_CLIENT_REQ == tsk->tsk_type) {
+        main_loop_handle_client_in_event(tsk);
+    } else if (SPIDER_SERVER_ACK == tsk->tsk_type) {
+        main_loop_handle_ack_client_event(tsk);
+    } else {
+        main_loop_handle_scan_in_event(tsk);
+    }
+}
+
+void main_loop_handle_scan_out_event(wificam_spider_s* tsk)
 {
     int ret = 0;
 
@@ -361,6 +332,16 @@ void main_loop_handle_out_event(wificam_spider_s* tsk)
         return;
     }
     main_loop_epoll_ctl(EPOLL_CTL_MOD, EPOLLIN, tsk);
+}
+
+
+void main_loop_handle_out_event(wificam_spider_s* tsk)
+{
+    if (SPIDER_SERVER_ACK == tsk->tsk_type) {
+        
+    } else {
+        main_loop_handle_scan_out_event(tsk);
+    }
 }
 
 
@@ -439,10 +420,8 @@ void main_loop_handle(uint32_t event, void* ptr)
 
     if (event & EPOLLERR) {
         main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
-        //free_spider_task(tsk);
     } else if (event & EPOLLHUP) {
         main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
-        //free_spider_task(tsk);
     } else if (event & EPOLLIN) {
         main_loop_handle_in_event(tsk);
     } else if (event & EPOLLOUT) {
@@ -462,6 +441,7 @@ int main(int argc, char **argv)
 
    init();
    redis_init_conn_ctx();
+   init_unix_server(main_loop_epoll_ctl);
 
    ret = redis_get_first_ip_with_key(g_scaning_city, &ipaddr);
    

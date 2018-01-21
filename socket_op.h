@@ -22,6 +22,8 @@ typedef enum spider_task {
     SPIDER_UNKOWN = 0,
     SPIDER_INIT,
     SPIDER_WANSVIEW,
+    SPIDER_CLIENT_REQ,
+    SPIDER_SERVER_ACK,
 } spider_task_e;
 
 typedef struct wificam_ip_s {
