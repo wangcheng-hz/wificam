@@ -26,7 +26,7 @@ mail: alexwanghangzhou@gmail.com
 #define EPOLL_MAXEVENTS 256
 #define EPOLL_TIMEOUT   7000
 
-static int g_wificam_scan_slid_win = 1000;
+static int g_wificam_scan_slid_win = 8000;
 static int g_total_spider_tsks = 0;
 static long g_total_spider_ipaddr_tsks = 0;
 static wificam_ip_s g_last_spider_addr;
@@ -41,7 +41,7 @@ static int g_revbuf_len = 8 * 1024 * 1024;
 
 void init()
 {
-    g_scaning_city = g_city_list[7];
+    g_scaning_city = g_city_list[0];
 
     g_scan_epfd = epoll_create(1);
     if (g_scan_epfd < 0) {
@@ -77,6 +77,67 @@ static char* get_next_city(const char* city)
         }
     }
     return tmp;
+}
+
+static int get_city_index(const char* city)
+{
+    int index = -1;
+    int len = sizeof(g_city_list) / sizeof(char*);
+
+    for (int i = 0; i < len; i++) {
+        if (0 == strcmp(city, g_city_list[i]) && i < len - 1) {
+            index = i;
+            break;
+        }
+    }
+    return index;
+}
+
+static void main_loop_execute_cmd(const char* cmd)
+{
+    redisReply* reply = NULL;
+    
+    reply = redis_execute_cmd(cmd);
+    if (NULL == reply || REDIS_REPLY_ERROR == reply->type) {
+        syslog(LOG_ERR, "cmd:%s executes failed.\n", cmd);
+    }
+    freeReplyObject(reply);
+}
+
+static void get_start_scanning_addr( wificam_ip_s* p_addr ) 
+{
+    int net_addr;
+    redisReply* reply = NULL;
+    
+    reply = redis_execute_cmd("GET scanninginfo");
+    if (NULL == reply || REDIS_REPLY_ERROR == reply->type 
+        || REDIS_REPLY_NIL == reply->type) {
+        (void)redis_get_first_ip_with_key(g_scaning_city, p_addr);
+        syslog(LOG_INFO, "execute GET scanninginfo failed\n");
+    } else {
+        char* tmp = NULL;
+        int index = -1;
+        char ip[16] = {0};
+        char city[16] = {0};
+        unsigned short port = 0;
+        tmp = strchr(reply->str, ':');
+        memcpy(ip, reply->str, tmp - reply->str);
+        tmp = strchr(reply->str, '-');
+        memcpy(city, tmp+1, reply->str + reply->len - tmp);
+        syslog(LOG_INFO, "Get scanning information:%s === %s:%d-%s\n", reply->str, ip, port, city);
+        index = get_city_index(city);
+        if (index >= 0) {
+            g_scaning_city = g_city_list[index];
+            memset(p_addr, 0x0, sizeof(wificam_ip_s));
+            p_addr->i_index = 0;
+            inet_pton(AF_INET, ip, &net_addr);
+            p_addr->i_ipaddr = ntohl(net_addr);
+        } else {
+            (void)redis_get_first_ip_with_key(g_scaning_city, p_addr);
+        }
+    }
+
+    freeReplyObject(reply);
 }
 
 int main_loop_rev_data(int fd)
@@ -162,7 +223,8 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
         ipaddr->us_port, g_total_spider_ipaddr_tsks);
     }
 
-    return ret;
+    /* EINPROGRESS, connect return value is -1, but now need regard as success. */
+    return 0;
 }
 
 
@@ -206,7 +268,10 @@ NEXTCITY:  ret = redis_get_next_ip_with_key(p_key, p_addr);
             }
             return;
         }
-        init_spider_connection(p_key, p_addr);
+        ret = init_spider_connection(p_key, p_addr);
+        if (WIFICAM_SUCCESS != ret) { 
+            break; /* in case of goes into dead loop */
+        }
     }
 }
 
@@ -214,7 +279,6 @@ void main_loop_handle_scan_in_event(wificam_spider_s* tsk)
 {
     int ret = 0;
     char cmd[256] = {0};
-    redisReply* reply = NULL;
     static char* key[] = {"Server: GoAhead-Webs", "realm=\"WIFICAM\"", "Server: Hikvision-Webs",
                            "Server: iDVRhttpSvr", "Server: H3C", "Server: Quidway",
                            "Server: cisco-IOS", "DVRDVS-Webs", "NVR",
@@ -235,6 +299,9 @@ void main_loop_handle_scan_in_event(wificam_spider_s* tsk)
         main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
         syslog(LOG_ERR, "Receive data failed.\n");
         return;
+    } else if( 0 == ret) {
+        main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
+        return; /* connection closed. */
     }
     syslog(LOG_INFO, "%s:%d contens:%s", tsk->ipstr, tsk->ipaddr.us_port, g_rev_buff);
 
@@ -242,13 +309,14 @@ void main_loop_handle_scan_in_event(wificam_spider_s* tsk)
         if (NULL != strstr(g_rev_buff, key[i]))
         {
             snprintf(cmd, sizeof(cmd), "RPUSH %s %s:%d-%s", brand[i],
-                     tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
-             reply = redis_execute_cmd(cmd);
-             if (NULL == reply) {
-                 syslog(LOG_ERR, "Push data to redis failed, cmd:%s\n", cmd);
-             }
-             freeReplyObject(reply);
-             break;
+                 tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
+            main_loop_execute_cmd(cmd);
+
+            /* update the scanning info for next start/restarting to continue */
+            snprintf(cmd, sizeof(cmd), "SET scanninginfo %s:%d-%s",
+                  tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
+            main_loop_execute_cmd(cmd);
+            break;
         }
     }
 
@@ -443,13 +511,8 @@ int main(int argc, char **argv)
    redis_init_conn_ctx();
    init_unix_server(main_loop_epoll_ctl);
 
-   ret = redis_get_first_ip_with_key(g_scaning_city, &ipaddr);
-   
-   ipaddr.i_index = 0;
-   int net_addr;
-   inet_pton(AF_INET, "219.217.4.141", &net_addr);
-   ipaddr.i_ipaddr = ntohl(net_addr);
-   ipaddr.us_port = 81;
+   /* continue scanning process and get last scanning ip from redis */
+   get_start_scanning_addr(&ipaddr);
    
    main_loop_handle_slid_window(g_scaning_city, &ipaddr);
    while (1) {
