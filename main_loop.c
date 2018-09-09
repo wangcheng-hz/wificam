@@ -32,10 +32,6 @@ static long g_total_spider_ipaddr_tsks = 0;
 static wificam_ip_s g_last_spider_addr;
 int g_scan_epfd = WIFICAM_INVALID_FD;
 char *g_rev_buff = NULL;
-static char *g_city_list[] = {"SC", "HB", "GD", "SD", "ZJ", "JS", "SH", "LN",
-                              "BJ", "CQ", "FJ", "HN", "HE", "HA", "SX", "JX",
-                              "SN", "AH", "HL", "GX", "JL", "YN", "TJ", "NM",
-                              "XJ", "GS", "GZ", "HI", "NX", "QH", "XZ", "HK"};
 static char *g_scaning_city = NULL;
 static int g_revbuf_len = 8 * 1024 * 1024;
 
@@ -65,34 +61,6 @@ void finish()
    exit(-1);
 }
 
-static char* get_next_city(const char* city)
-{
-    char* tmp = NULL;
-    int len = sizeof(g_city_list) / sizeof(char*);
-
-    for (int i = 0; i < len; i++) {
-        if (0 == strcmp(city, g_city_list[i]) && i < len - 1) {
-            tmp = g_city_list[i + 1];
-            return tmp;
-        }
-    }
-    return tmp;
-}
-
-static int get_city_index(const char* city)
-{
-    int index = -1;
-    int len = sizeof(g_city_list) / sizeof(char*);
-
-    for (int i = 0; i < len; i++) {
-        if (0 == strcmp(city, g_city_list[i]) && i < len - 1) {
-            index = i;
-            break;
-        }
-    }
-    return index;
-}
-
 static void main_loop_execute_cmd(const char* cmd)
 {
     redisReply* reply = NULL;
@@ -106,7 +74,6 @@ static void main_loop_execute_cmd(const char* cmd)
 
 static void get_start_scanning_addr( wificam_ip_s* p_addr ) 
 {
-    int net_addr;
     redisReply* reply = NULL;
     
     reply = redis_execute_cmd("GET scanninginfo");
@@ -130,8 +97,7 @@ static void get_start_scanning_addr( wificam_ip_s* p_addr )
             g_scaning_city = g_city_list[index];
             memset(p_addr, 0x0, sizeof(wificam_ip_s));
             p_addr->i_index = 0;
-            inet_pton(AF_INET, ip, &net_addr);
-            p_addr->i_ipaddr = ntohl(net_addr);
+            strlcpy(p_addr->str, reply->element[0]->str, WIFICAM_IPADDR_LEN);
         } else {
             (void)redis_get_first_ip_with_key(g_scaning_city, p_addr);
         }
@@ -203,24 +169,27 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
     if (NULL == tsk) {
         return -1;
     }
-
+    unsigned int port = 0;
+    char ip[16] = {'\0'};
+    split_host_as_ip_port(ipaddr->str, ip, &port);
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port   = htons(ipaddr->us_port);
-    (void)inet_pton(AF_INET, tsk->ipstr, &servaddr.sin_addr);
+    servaddr.sin_port   = htons(port);
+    (void)inet_pton(AF_INET, ip, &servaddr.sin_addr);
     ret = connect(sockfd, &servaddr, sizeof(servaddr));
     if (ret < 0 && errno != EINPROGRESS) {
-        syslog(LOG_ERR, "Try to connect [%s:%d] failed, errstring [%s].\n",
-               tsk->ipstr, ipaddr->us_port, strerror(errno));
+        syslog(LOG_ERR, "Try to connect [%s] failed, errstring [%s].\n",
+               ipaddr->str, strerror(errno));
         close(sockfd);
         free_spider_task(tsk);
         return -1;
     }
     main_loop_epoll_ctl(EPOLL_CTL_ADD, EPOLLIN | EPOLLOUT, tsk);
 
-    if (!(g_total_spider_ipaddr_tsks % 1000)) {
-        syslog(LOG_INFO, "add epoll, connect [%s:%d], total spider tasks:%lu\n", tsk->ipstr,
-        ipaddr->us_port, g_total_spider_ipaddr_tsks);
+    //if (!(g_total_spider_ipaddr_tsks % 1000)) 
+    {
+        syslog(LOG_INFO, "add epoll, connect [%s], total spider tasks:%lu\n", ipaddr->str,
+        g_total_spider_ipaddr_tsks);
     }
 
     /* EINPROGRESS, connect return value is -1, but now need regard as success. */
@@ -232,8 +201,6 @@ int init_spider_connection(const char* p_key, const wificam_ip_s* ipaddr)
 void main_loop_handle_slid_window(char* p_key, wificam_ip_s* p_addr)
 {
     int ret = WIFICAM_FAILED;
-    int hostip = 0;
-    char ip[128] = {0};
     char* nextcity = NULL;
 
     if (NULL == p_key || NULL == p_addr) {
@@ -245,8 +212,8 @@ void main_loop_handle_slid_window(char* p_key, wificam_ip_s* p_addr)
         return;
     }
 
-    hostip = htonl(p_addr->i_ipaddr);
-    inet_ntop(AF_INET, &hostip, ip, sizeof(ip));
+    //hostip = htonl(p_addr->i_ipaddr);
+    //inet_ntop(AF_INET, &hostip, ip, sizeof(ip));
 
     while (g_total_spider_tsks < g_wificam_scan_slid_win) {
 
@@ -262,9 +229,9 @@ NEXTCITY:  ret = redis_get_next_ip_with_key(p_key, p_addr);
                     redis_get_first_ip_with_key(p_key, p_addr);
                     goto NEXTCITY;
                 }
-                syslog(LOG_ERR, "Scan finished:%s, %s.\n", p_key, ip);
+                syslog(LOG_ERR, "Scan finished:%s, %s.\n", p_key, p_addr->str);
             } else {
-                syslog(LOG_ERR, "Get next ip failed from:%s, %s.\n", p_key, ip);
+                syslog(LOG_ERR, "Get next ip failed from:%s, %s.\n", p_key, p_addr->str);
             }
             return;
         }
@@ -303,18 +270,18 @@ void main_loop_handle_scan_in_event(wificam_spider_s* tsk)
         main_loop_epoll_ctl(EPOLL_CTL_DEL, EPOLLIN, tsk);
         return; /* connection closed. */
     }
-    syslog(LOG_INFO, "%s:%d contens:%s", tsk->ipstr, tsk->ipaddr.us_port, g_rev_buff);
+    syslog(LOG_INFO, "%s contens:%s", tsk->ipaddr.str, g_rev_buff);
 
     for (int i = 0; i < sizeof(key) / sizeof(char*); ++i) {
         if (NULL != strstr(g_rev_buff, key[i]))
         {
-            snprintf(cmd, sizeof(cmd), "RPUSH %s %s:%d-%s", brand[i],
-                 tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
+            snprintf(cmd, sizeof(cmd), "RPUSH %s %s-%s", brand[i],
+                 tsk->ipaddr.str, tsk->location);
             main_loop_execute_cmd(cmd);
 
             /* update the scanning info for next start/restarting to continue */
-            snprintf(cmd, sizeof(cmd), "SET scanninginfo %s:%d-%s",
-                  tsk->ipstr, tsk->ipaddr.us_port, tsk->location);
+            snprintf(cmd, sizeof(cmd), "SET scanninginfo %s-%s",
+                  tsk->ipaddr.str, tsk->location);
             main_loop_execute_cmd(cmd);
             break;
         }
@@ -390,13 +357,10 @@ void main_loop_handle_scan_out_event(wificam_spider_s* tsk)
 {
     int ret = 0;
 
-    ret = send_get_request(tsk->sockfd,
-                           tsk->ipstr,
-                           tsk->ipaddr.us_port);
+    ret = send_get_request(tsk->sockfd, tsk->ipaddr.str);
 
     if (ret < 0) {
-        syslog(LOG_ERR, "Send out request failed to %s:%d\n",
-               tsk->ipstr, tsk->ipaddr.us_port);
+        syslog(LOG_ERR, "Send out request failed to %s\n", tsk->ipaddr.str);
         return;
     }
     main_loop_epoll_ctl(EPOLL_CTL_MOD, EPOLLIN, tsk);
@@ -438,8 +402,8 @@ void print_event_types(uint32_t event, wificam_spider_s* tsk)
     int len = 0;
     char buf[256] = {0};
 
-    len = snprintf(buf, sizeof(buf), "socket:%d %s:%d, events:",
-                   tsk->sockfd, tsk->ipstr, tsk->ipaddr.us_port);
+    len = snprintf(buf, sizeof(buf), "socket:%d %s, events:",
+                   tsk->sockfd, tsk->ipaddr.str);
     if (event & EPOLLIN) {
         len += snprintf(buf+len, sizeof(buf), "%s ", "EPOLLIN");
     }

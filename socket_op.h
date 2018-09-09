@@ -15,7 +15,8 @@ mail: alexwanghangzhou@gmail.com
 #define WIFICAM_FAILED      -1
 #define WIFICAM_SCAN_FINISH 1
 
-
+#define WIFICAM_IPADDR_LEN (21 + 1)  //to store string like: 255.255.255.255:65535
+ 
 #define WIFICAM_INVALID_FD -1
 
 typedef enum spider_task {
@@ -28,8 +29,9 @@ typedef enum spider_task {
 
 typedef struct wificam_ip_s {
     int i_index;  /* the index in redis sort set */
-    unsigned int i_ipaddr; /* store the int32 ip address, host mode, need to be convert with htonl */
-    unsigned short us_port;
+    char str[WIFICAM_IPADDR_LEN];
+    //unsigned int i_ipaddr; /* store the int32 ip address, host mode, need to be convert with htonl */
+    //unsigned short us_port;
 } wificam_ip_s;
 
 
@@ -37,7 +39,7 @@ typedef struct wificam_spider {
     spider_task_e tsk_type;
     int sockfd;
     wificam_ip_s ipaddr;
-    char* ipstr;
+    //char* ipstr;
     char* location;
     void* data;
 } wificam_spider_s;
