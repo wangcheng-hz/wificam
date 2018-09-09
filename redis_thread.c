@@ -119,14 +119,15 @@ int redis_get_first_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
                 freeReplyObject(reply);
                 return WIFICAM_SCAN_FINISH;
             }
+            continue;
         }
         
         if (is_valid_ip_addr(reply->element[0]->str) < 0)
         {
-            freeReplyObject(reply);
             snprintf(buff, sizeof(buff), "ZREM %s-%s %s", 
                      _redis_raw_ip_prefix, p_key, reply->element[0]->str);
             syslog(LOG_ERR, "Remove invalid ip address:%s \n", buff);
+            freeReplyObject(reply);
             reply = redis_execute_cmd(buff);
             freeReplyObject(reply);
             continue;
@@ -170,10 +171,10 @@ int redis_get_next_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
         //convert_set2ipaddrs(reply->element[0]->str, &start, &finish);
         if (is_valid_ip_addr(reply->element[0]->str) < 0)
         {
-            freeReplyObject(reply);
             snprintf(buff, sizeof(buff), "ZREM %s-%s %s", 
                      _redis_raw_ip_prefix, p_key, reply->element[0]->str);
             syslog(LOG_ERR, "Remove invalid ip address for get next ip:%s \n", buff);
+            freeReplyObject(reply);
             reply = redis_execute_cmd(buff);
             freeReplyObject(reply);
             continue;
