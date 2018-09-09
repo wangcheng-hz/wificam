@@ -96,6 +96,8 @@ def isValidIpAddr(str):
         IP.IP(str)
     except:
         return False
+    if len(str.split('.')) != 4:
+	return False
     return True
 
 def scan_valid_ipaddr(city=None):

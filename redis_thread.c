@@ -120,6 +120,17 @@ int redis_get_first_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
                 return WIFICAM_SCAN_FINISH;
             }
         }
+        
+        if (is_valid_ip_addr(reply->element[0]->str) < 0)
+        {
+            freeReplyObject(reply);
+            snprintf(buff, sizeof(buff), "ZREM %s-%s %s", 
+                     _redis_raw_ip_prefix, p_key, reply->element[0]->str);
+            syslog(LOG_ERR, "Remove invalid ip address:%s \n", buff);
+            reply = redis_execute_cmd(buff);
+            freeReplyObject(reply);
+            continue;
+        }
         ret = WIFICAM_SUCCESS;
     }
 
@@ -144,20 +155,35 @@ int redis_get_next_ip_with_key(const char* p_key, wificam_ip_s* p_addr)
 
     //////////scan for next ip address//////////////////////////////////////
     int index = p_addr->i_index + 1;
-    snprintf(buff, sizeof(buff), "ZRANGE %s-%s %d %d", _redis_raw_ip_prefix, p_key, index, index);
-    reply = redis_execute_cmd(buff);
-    if (NULL == reply) {
-        syslog(LOG_ERR, "execute cmd:%s failed\n", buff);
-        return WIFICAM_FAILED;
-    }
-    if (0 == reply->elements) {
+    while (1) {
+        snprintf(buff, sizeof(buff), "ZRANGE %s-%s %d %d", _redis_raw_ip_prefix, p_key, index, index);
+        reply = redis_execute_cmd(buff);
+        if (NULL == reply) {
+            syslog(LOG_ERR, "execute cmd:%s failed\n", buff);
+            return WIFICAM_FAILED;
+        }
+        if (0 == reply->elements) {
+            freeReplyObject(reply);
+            return WIFICAM_SCAN_FINISH;
+        }
+        
+        //convert_set2ipaddrs(reply->element[0]->str, &start, &finish);
+        if (is_valid_ip_addr(reply->element[0]->str) < 0)
+        {
+            freeReplyObject(reply);
+            snprintf(buff, sizeof(buff), "ZREM %s-%s %s", 
+                     _redis_raw_ip_prefix, p_key, reply->element[0]->str);
+            syslog(LOG_ERR, "Remove invalid ip address for get next ip:%s \n", buff);
+            reply = redis_execute_cmd(buff);
+            freeReplyObject(reply);
+            continue;
+        }
+        
+        p_addr->i_index = index;
+        strlcpy(p_addr->str, reply->element[0]->str, WIFICAM_IPADDR_LEN);
         freeReplyObject(reply);
-        return WIFICAM_SCAN_FINISH;
+        break;
     }
-    //convert_set2ipaddrs(reply->element[0]->str, &start, &finish);
-    freeReplyObject(reply);
-    p_addr->i_index = index;
-    strlcpy(p_addr->str, reply->element[0]->str, WIFICAM_IPADDR_LEN);
 
     return WIFICAM_SUCCESS;
 }

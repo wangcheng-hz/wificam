@@ -75,33 +75,21 @@ static void main_loop_execute_cmd(const char* cmd)
 static void get_start_scanning_addr( wificam_ip_s* p_addr ) 
 {
     redisReply* reply = NULL;
+
+    memset(p_addr, 0x0, sizeof(wificam_ip_s));
     
     reply = redis_execute_cmd("GET scanninginfo");
-    if (NULL == reply || REDIS_REPLY_ERROR == reply->type 
-        || REDIS_REPLY_NIL == reply->type) {
-        (void)redis_get_first_ip_with_key(g_scaning_city, p_addr);
+    if (NULL == reply || REDIS_REPLY_ERROR == reply->type || REDIS_REPLY_NIL == reply->type) {
         syslog(LOG_INFO, "execute GET scanninginfo failed\n");
     } else {
-        char* tmp = NULL;
-        int index = -1;
-        char ip[16] = {0};
-        char city[16] = {0};
-        unsigned short port = 0;
-        tmp = strchr(reply->str, ':');
-        memcpy(ip, reply->str, tmp - reply->str);
-        tmp = strchr(reply->str, '-');
-        memcpy(city, tmp+1, reply->str + reply->len - tmp);
-        syslog(LOG_INFO, "Get scanning information:%s === %s:%d-%s\n", reply->str, ip, port, city);
-        index = get_city_index(city);
+        syslog(LOG_INFO, "Get scanning information:%s", reply->str);
+        int index = get_city_index(reply->str);
         if (index >= 0) {
             g_scaning_city = g_city_list[index];
-            memset(p_addr, 0x0, sizeof(wificam_ip_s));
-            p_addr->i_index = 0;
-            strlcpy(p_addr->str, reply->element[0]->str, WIFICAM_IPADDR_LEN);
-        } else {
-            (void)redis_get_first_ip_with_key(g_scaning_city, p_addr);
         }
     }
+    
+    (void)redis_get_first_ip_with_key(g_scaning_city, p_addr);
 
     freeReplyObject(reply);
 }
@@ -202,6 +190,7 @@ void main_loop_handle_slid_window(char* p_key, wificam_ip_s* p_addr)
 {
     int ret = WIFICAM_FAILED;
     char* nextcity = NULL;
+    char cmd[256] = {0};
 
     if (NULL == p_key || NULL == p_addr) {
         syslog(LOG_ERR, "Absolutely something is wrong, input NULL pointers.\n");
@@ -222,6 +211,10 @@ NEXTCITY:  ret = redis_get_next_ip_with_key(p_key, p_addr);
             if (WIFICAM_SCAN_FINISH == ret) {
                 nextcity = get_next_city(p_key);
                 if (NULL != nextcity) {
+                    /* update the scanning info for next start/restarting to continue */
+                    snprintf(cmd, sizeof(cmd), "SET scanninginfo %s", nextcity);
+                    main_loop_execute_cmd(cmd);
+                
                     /* p_key is a tmp stack var. */
                     p_key = nextcity;
                     g_scaning_city = nextcity;
@@ -277,11 +270,6 @@ void main_loop_handle_scan_in_event(wificam_spider_s* tsk)
         {
             snprintf(cmd, sizeof(cmd), "RPUSH %s %s-%s", brand[i],
                  tsk->ipaddr.str, tsk->location);
-            main_loop_execute_cmd(cmd);
-
-            /* update the scanning info for next start/restarting to continue */
-            snprintf(cmd, sizeof(cmd), "SET scanninginfo %s-%s",
-                  tsk->ipaddr.str, tsk->location);
             main_loop_execute_cmd(cmd);
             break;
         }

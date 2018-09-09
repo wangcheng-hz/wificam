@@ -6,6 +6,7 @@ set -e
 systemdir="/usr/lib/systemd/system/"
 sysctldir="/etc/sysctl.d/"
 
+mkdir -p /etc/wificamredis
 cp ./redis.conf /etc/redis.conf
 cp ./redis.service $systemdir/
 cp ./wifiscan.conf $sysctldir/

@@ -110,6 +110,13 @@ char* get_next_city(const char* city)
     return tmp;
 }
 
+int is_valid_ip_addr(char* ipaddr)
+{
+    if (NULL == ipaddr) {return -1;}
+    if (NULL == strchr(ipaddr, '.')) {return -1;}
+    return 0;
+}
+
 void setSockNonBlock(int fd)
 {
    int flags = 0;

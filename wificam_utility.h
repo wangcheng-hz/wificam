@@ -24,6 +24,7 @@ size_t strlcpy(char *dst, const char *src, size_t dsize);
 void split_host_as_ip_port(const char* host, char*ip, unsigned int* port);
 int get_city_index(const char* city);
 char* get_next_city(const char* city);
+int is_valid_ip_addr(char* ipaddr);
 void setSockNonBlock(int fd);
 int send_get_request(int sockfd, const char *host);
 wificam_spider_s* malloc_spider_task( spider_task_e tsk_type,
