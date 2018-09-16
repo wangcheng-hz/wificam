@@ -77,7 +77,7 @@ void split_host_as_ip_port(const char* host, char*ip, unsigned int* port)
 {
     if (NULL == host) { return ;}
     char* tmp = strchr(host, ':');
-    strlcpy(ip, host, tmp - host);
+    strlcpy(ip, host, tmp - host + 1);
     *port = strtol(tmp +1, NULL, 0);
 }
 

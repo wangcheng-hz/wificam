@@ -118,7 +118,7 @@ def scan_valid_ipaddr(city=None):
                 redis_cmd = "zmap -p %d %s 8 -i ens3f0" % (port, zmap_str)
                 logger.info(redis_cmd)
                 __, output = commands.getstatusoutput(redis_cmd)
-                raw_iplist = output.split()
+                raw_iplist = output.split('\n')
                 for raw_ip in raw_iplist:   #parse valid ip addr
                     if isValidIpAddr(raw_ip):
                         store_key = "raw-ip-for-%s" % key
