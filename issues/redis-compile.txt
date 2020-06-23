@@ -1,0 +1,61 @@
+I compiled redis in WSL, but it reported compile error like:
+	./mkreleasehdr.sh: 15: Syntax error: end of file unexpected (expecting "then")
+
+why?
+
+Manually execute the script:
+root@N-20N3PF225B28:/home/kali/redis# sh -x src/mkreleasehdr.sh
++ git show-ref --head --hash=8
++ head -n1
++ GIT_SHA1=0cae0900
++ git diff --no-ext-diff
++ wc -l
++ GIT_DIRTY=0
++ uname -n
++ date +%s
++ BUILD_ID=N-20N3PF225B28-1592796657
+src/mkreleasehdr.sh: 15: Syntax error: end of file unexpected (expecting "then")
+
+OK, the same issue, check with the latest version in github,
+yes, confirmed, it's the same file.
+so there shall not happened like that.
+
+google it, find a similar issue, but just said solved, not show the way and why.
+debug with shell script, check the file format, in WSL it using CRLF format may impact with linux shell script.
+	I made git ignore CRLF in WSL, so here git not report issue.
+change format as linux format:
+root@N-20N3PF225B28:/home/kali/redis# dos2unix
+.git/              BUGS               MANIFESTO          deps/              runtest-moduleapi  tests/
+.github/           CONTRIBUTING       Makefile           redis.conf         runtest-sentinel   utils/
+.gitignore         COPYING            README.md          runtest            sentinel.conf
+00-RELEASENOTES    INSTALL            TLS.md             runtest-cluster    src/
+root@N-20N3PF225B28:/home/kali/redis# dos2unix src/mkreleasehdr.sh
+dos2unix: converting file src/mkreleasehdr.sh to Unix format...
+root@N-20N3PF225B28:/home/kali/redis#
+root@N-20N3PF225B28:/home/kali/redis#
+root@N-20N3PF225B28:/home/kali/redis#
+
+execute it again:
+root@N-20N3PF225B28:/home/kali/redis# sh -x src/mkreleasehdr.sh
++ git show-ref --head --hash=8
++ head -n1
++ GIT_SHA1=0cae0900
++ git diff --no-ext-diff
++ wc -l
++ GIT_DIRTY=0
++ uname -n
++ date +%s
++ BUILD_ID=N-20N3PF225B28-1592796705
++ [ -n  ]
++ test -f release.h
++ touch release.h
++ cat release.h
++ grep SHA1
++ grep 0cae0900
++ echo #define REDIS_GIT_SHA1 "0cae0900"
++ echo #define REDIS_GIT_DIRTY "0"
++ echo #define REDIS_BUILD_ID "N-20N3PF225B28-1592796705"
++ touch release.c
+root@N-20N3PF225B28:/home/kali/redis# ls
+
+OK, it passed, just caused by the script file format.
